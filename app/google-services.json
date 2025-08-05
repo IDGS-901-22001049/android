@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "182752001136",
+    "project_id": "aguainteligenteapp",
+    "storage_bucket": "aguainteligenteapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:182752001136:android:4de227bb6075c4ba40c8b5",
+        "android_client_info": {
+          "package_name": "com.example.aguainteligente"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDvfah0oauCp9My3U_lL3LMuRB9ApqZ4ao"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

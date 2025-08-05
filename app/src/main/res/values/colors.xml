@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="orange">#FFA500</color>
+    <color name="blue_dark">#FF0D1B2A</color>
+    <color name="blue_electric">#FF00C8F8</color>
+    <color name="green_accent">#FF00ED64</color>
+    <color name="green_light">#FF80FFB2</color>
+    <color name="grey_light">#FFE0E0E0</color>
+    <color name="grey_dark">#FF2C3E50</color>
+    <color name="surface_dark">#FF1C2C40</color>
+    <color name="error">#FFD32F2F</color>
+    <color name="md3_primary">@color/blue_electric</color>
+    <color name="md3_onPrimary">@color/white</color>
+    <color name="md3_primaryContainer">@color/blue_dark</color>
+    <color name="md3_onPrimaryContainer">@color/white</color>
+    <color name="md3_secondary">@color/green_accent</color>
+    <color name="md3_onSecondary">@color/black</color>
+    <color name="md3_secondaryContainer">@color/green_light</color>
+    <color name="md3_onSecondaryContainer">@color/black</color>
+    <color name="md3_surface">@color/surface_dark</color>
+    <color name="md3_onSurface">@color/grey_light</color>
+    <color name="md3_surfaceVariant">@color/grey_dark</color>
+    <color name="md3_onSurfaceVariant">@color/grey_light</color>
+    <color name="md3_error">@color/error</color>
+    <color name="md3_onError">@color/white</color>
+    <color name="md3_background">@color/blue_dark</color>
+    <color name="md3_onBackground">@color/grey_light</color>
+</resources>

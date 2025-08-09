@@ -1,11 +1,11 @@
 package com.example.aguainteligente.ui.dashboard
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.content.Context
+import android.Manifest
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -40,114 +40,28 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.app.NotificationCompat
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.aguainteligente.R
-import com.example.aguainteligente.data.model.WaterConsumption
 import com.example.aguainteligente.data.repository.AuthRepository
 import com.example.aguainteligente.data.repository.FirestoreRepository
-import com.example.aguainteligente.data.service.MqttManager
 import com.example.aguainteligente.ui.theme.AguaInteligenteTheme
 import com.example.aguainteligente.ui.theme.BlueDark
 import com.example.aguainteligente.ui.theme.BlueElectric
 import com.example.aguainteligente.ui.theme.GreenAccent
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
-
 
 val Orange = Color(0xFFFFA500)
-class DashboardViewModel(private val firestoreRepository: FirestoreRepository) : ViewModel() {
-    private val _dailyConsumption = MutableStateFlow(0f)
-    val dailyConsumption: StateFlow<Float> = _dailyConsumption
-
-    private val _weeklyConsumption = MutableStateFlow(0f)
-    val weeklyConsumption: StateFlow<Float> = _weeklyConsumption
-
-    private val _monthlyConsumption = MutableStateFlow(0f)
-    val monthlyConsumption: StateFlow<Float> = _monthlyConsumption
-
-    private val _previousMonthConsumption = MutableStateFlow(0f)
-    val previousMonthConsumption: StateFlow<Float> = _previousMonthConsumption
-
-    private val _monthlyHistory = MutableStateFlow<List<Pair<String, Float>>>(emptyList())
-    val monthlyHistory: StateFlow<List<Pair<String, Float>>> = _monthlyHistory
-
-    private val _peakConsumptionData = MutableStateFlow<Map<String, Float>>(emptyMap())
-    val peakConsumptionData: StateFlow<Map<String, Float>> = _peakConsumptionData
-
-    private val _isLoadingHistory = MutableStateFlow(true)
-    val isLoadingHistory: StateFlow<Boolean> = _isLoadingHistory
-
-    private val _historyError = MutableStateFlow<String?>(null)
-    val historyError: StateFlow<String?> = _historyError
-
-    fun fetchConsumptionData(userId: String) {
-        viewModelScope.launch {
-            _isLoadingHistory.value = true
-            _historyError.value = null
-            try {
-                _dailyConsumption.value = firestoreRepository.getDailyWaterConsumption(userId)
-                _weeklyConsumption.value = firestoreRepository.getWeeklyWaterConsumption(userId)
-                _monthlyConsumption.value = firestoreRepository.getMonthlyWaterConsumption(userId)
-                _previousMonthConsumption.value = firestoreRepository.getPreviousMonthWaterConsumption(userId)
-                _monthlyHistory.value = firestoreRepository.getMonthlyWaterHistory(userId, 6)
-                _peakConsumptionData.value = firestoreRepository.getPeakConsumptionData(userId)
-
-            } catch (e: Exception) {
-                _historyError.value = "Error al cargar datos: ${e.localizedMessage}"
-                e.printStackTrace()
-            } finally {
-                _isLoadingHistory.value = false
-            }
-        }
-    }
-
-    fun addWaterConsumption(userId: String, liters: Float) {
-        viewModelScope.launch {
-            _isLoadingHistory.value = true
-            _historyError.value = null
-            try {
-                val newConsumption = WaterConsumption(
-                    userId = userId,
-                    liters = liters,
-                    timestamp = System.currentTimeMillis()
-                )
-                firestoreRepository.addWaterConsumption(newConsumption)
-                fetchConsumptionData(userId)
-            } catch (e: Exception) {
-                _historyError.value = "Error al agregar consumo: ${e.localizedMessage}"
-                e.printStackTrace()
-                _isLoadingHistory.value = false
-            }
-        }
-    }
-}
-
-class DashboardViewModelFactory(private val repository: FirestoreRepository) : androidx.lifecycle.ViewModelProvider.Factory {
-    override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        if (modelClass.isAssignableFrom(DashboardViewModel::class.java)) {
-            @Suppress("UNCHECKED_CAST")
-            return DashboardViewModel(repository) as T
-        }
-        throw IllegalArgumentException("Unknown ViewModel class")
-    }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
     onLogout: () -> Unit,
-    onNavigateToTips: () -> Unit = {},
-    authRepository: AuthRepository = remember { AuthRepository() },
-    firestoreRepository: FirestoreRepository = remember { FirestoreRepository() },
-    mqttManager: MqttManager = remember { MqttManager(Firebase.auth.currentUser?.uid) },
+    onNavigateToTips: () -> Unit,
     dashboardViewModel: DashboardViewModel = viewModel(
-        factory = DashboardViewModelFactory(firestoreRepository)
+        factory = DashboardViewModelFactory(
+            firestoreRepo = remember { FirestoreRepository() },
+            authRepo = remember { AuthRepository() }
+        )
     )
 ) {
     val currentUser = Firebase.auth.currentUser
@@ -164,68 +78,42 @@ fun DashboardScreen(
     val peakConsumptionData by dashboardViewModel.peakConsumptionData.collectAsState()
     val isLoadingHistory by dashboardViewModel.isLoadingHistory.collectAsState()
     val historyError by dashboardViewModel.historyError.collectAsState()
+    val currentFlowLiters by dashboardViewModel.currentFlowLiters.collectAsState()
+    val leakAlert by dashboardViewModel.leakAlert.collectAsState()
+    val valveState by dashboardViewModel.valveState.collectAsState()
 
     val context = LocalContext.current
-    val currentFlowLiters by mqttManager.currentFlowLiters.collectAsState()
-    val leakAlert by mqttManager.leakAlert.collectAsState()
-    var valveState by remember { mutableStateOf(false) }
-
-    val coroutineScope = rememberCoroutineScope()
-    val accumulatedSessionFlow = remember { MutableStateFlow(0f) }
-
-    LaunchedEffect(currentUser.uid) {
-        dashboardViewModel.fetchConsumptionData(currentUser.uid)
-        mqttManager.connect()
-    }
-
-    LaunchedEffect(currentFlowLiters) {
-        if (currentFlowLiters > 0) {
-            accumulatedSessionFlow.value += currentFlowLiters
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { isGranted ->
+            dashboardViewModel.initialize(context)
+            dashboardViewModel.fetchConsumptionData()
         }
-    }
+    )
 
-    LaunchedEffect(leakAlert) {
-        if (leakAlert) {
-            showLeakNotification(context)
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            mqttManager.disconnect()
+    LaunchedEffect(key1 = true) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            dashboardViewModel.initialize(context)
+            dashboardViewModel.fetchConsumptionData()
         }
     }
 
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        "Agua Inteligente",
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
-                    )
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = BlueDark,
-                ),
+                title = { Text("Agua Inteligente", color = Color.White, style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)) },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = BlueDark),
                 actions = {
                     IconButton(onClick = onNavigateToTips) {
-                        Icon(
-                            Icons.Default.Lightbulb,
-                            contentDescription = "Consejos de Ahorro",
-                            tint = MaterialTheme.colorScheme.onPrimary
-                        )
+                        Icon(Icons.Default.Lightbulb, contentDescription = "Consejos", tint = Color.White)
                     }
                     IconButton(onClick = {
-                        authRepository.logout()
+                        dashboardViewModel.logout()
                         onLogout()
                     }) {
-                        Icon(
-                            Icons.Default.ExitToApp,
-                            contentDescription = "Cerrar sesión",
-                            tint = MaterialTheme.colorScheme.onPrimary
-                        )
+                        Icon(Icons.Default.ExitToApp, contentDescription = "Cerrar sesión", tint = Color.White)
                     }
                 }
             )
@@ -308,8 +196,7 @@ fun DashboardScreen(
                     leakAlert = leakAlert,
                     valveState = valveState,
                     onValveStateChange = { isChecked ->
-                        valveState = isChecked
-                        mqttManager.publishValveState(if (isChecked) "ON" else "OFF")
+                        dashboardViewModel.setValveState(isChecked)
                     }
                 )
 
@@ -333,58 +220,6 @@ fun DashboardScreen(
                     )
 
                     PeakConsumptionCard(peakConsumptionData)
-                }
-
-                val currentAccumulated = accumulatedSessionFlow.collectAsState().value
-                AnimatedVisibility(
-                    visible = currentAccumulated > 0.01f,
-                    enter = scaleIn(animationSpec = tween(durationMillis = 500)) + fadeIn(),
-                    exit = scaleOut(animationSpec = tween(durationMillis = 500)) + fadeOut()
-                ) {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth(0.9f)
-                            .shadow(8.dp, RoundedCornerShape(28.dp)),
-                        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-                        shape = RoundedCornerShape(28.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                coroutineScope.launch {
-                                    if (currentAccumulated > 0) {
-                                        dashboardViewModel.addWaterConsumption(currentUser.uid, currentAccumulated)
-                                        accumulatedSessionFlow.value = 0f
-                                    }
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = GreenAccent
-                            ),
-                            shape = RoundedCornerShape(28.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.TrendingUp,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    "Guardar Consumo (${"%.2f".format(currentAccumulated)} L)",
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -469,7 +304,6 @@ fun ValveControlCard(
     }
 }
 
-
 @Composable
 fun AnimatedConsumptionCard(currentFlow: Float) {
     val animatedFlow by animateFloatAsState(
@@ -506,7 +340,7 @@ fun AnimatedConsumptionCard(currentFlow: Float) {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "💧 Consumo Actual",
+                    text = "💧 Consumo del Intervalo",
                     style = MaterialTheme.typography.titleLarge.copy(
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold
@@ -527,13 +361,6 @@ fun AnimatedConsumptionCard(currentFlow: Float) {
                         color = GreenAccent.copy(alpha = 0.8f),
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 4.sp
-                    )
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Detectados en el último intervalo del sensor",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
                 )
             }
@@ -573,7 +400,7 @@ fun HistoricalConsumptionCard(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Consumo Histórico",
+                    text = "Resumen de Consumo",
                     style = MaterialTheme.typography.titleLarge.copy(
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold
@@ -628,7 +455,7 @@ fun MonthlyComparisonCard(
                 .fillMaxWidth()
         ) {
             Text(
-                text = "📈 Comparación Mensual",
+                text = "📈 Historial Mensual",
                 style = MaterialTheme.typography.titleLarge.copy(
                     color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Bold
@@ -790,7 +617,7 @@ fun EnhancedBarChart(
 
                 drawContext.canvas.nativeCanvas.apply {
                     val paint = Paint().apply {
-                        color = android.graphics.Color.WHITE
+                        this.color = android.graphics.Color.WHITE
                         textSize = 14.sp.toPx()
                         textAlign = Paint.Align.CENTER
                         typeface = Typeface.DEFAULT_BOLD
@@ -805,7 +632,7 @@ fun EnhancedBarChart(
 
                 drawContext.canvas.nativeCanvas.apply {
                     val paint = Paint().apply {
-                        color = android.graphics.Color.WHITE
+                        this.color = android.graphics.Color.WHITE
                         textSize = 12.sp.toPx()
                         textAlign = Paint.Align.CENTER
                         typeface = Typeface.DEFAULT_BOLD
@@ -878,13 +705,12 @@ fun MonthlyHistoryChart(monthlyHistory: List<Pair<String, Float>>) {
 
                 drawContext.canvas.nativeCanvas.apply {
                     val textPaintLabel = Paint().apply {
-                        color = android.graphics.Color.WHITE
+                        this.color = android.graphics.Color.WHITE
                         textSize = 10.sp.toPx()
                         textAlign = Paint.Align.CENTER
-                        typeface = Typeface.DEFAULT_BOLD
                     }
                     val textPaintValue = Paint().apply {
-                        color = android.graphics.Color.WHITE
+                        this.color = android.graphics.Color.WHITE
                         textSize = 10.sp.toPx()
                         textAlign = Paint.Align.CENTER
                         typeface = Typeface.DEFAULT_BOLD
@@ -893,12 +719,12 @@ fun MonthlyHistoryChart(monthlyHistory: List<Pair<String, Float>>) {
                     drawText(
                         label,
                         x,
-                        size.height - padding + 10.dp.toPx(),
+                        size.height,
                         textPaintLabel
                     )
 
                     drawText(
-                        "%.1f".format(value),
+                        "%.0f".format(value),
                         x,
                         y - 10.dp.toPx(),
                         textPaintValue
@@ -959,7 +785,7 @@ fun ErrorCard(errorMessage: String) {
             verticalArrangement = Arrangement.Center
         ) {
             Icon(
-                Icons.Default.Assessment,
+                Icons.Default.ErrorOutline,
                 contentDescription = "Error",
                 tint = MaterialTheme.colorScheme.onErrorContainer,
                 modifier = Modifier.size(48.dp)
@@ -980,38 +806,6 @@ fun ErrorCard(errorMessage: String) {
         }
     }
 }
-
-fun showLeakNotification(context: Context) {
-    val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-    val channelId = "leak_alert_channel_id"
-    val notificationId = 101
-
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        val channel = NotificationChannel(
-            channelId,
-            "Alertas de Fuga de Agua",
-            NotificationManager.IMPORTANCE_HIGH
-        ).apply {
-            description = "Notificaciones para cuando se detecte una fuga de agua."
-            enableLights(true)
-            lightColor = Color.Red.hashCode()
-            enableVibration(true)
-            vibrationPattern = longArrayOf(0, 500, 200, 500)
-        }
-        notificationManager.createNotificationChannel(channel)
-    }
-
-    val builder = NotificationCompat.Builder(context, channelId)
-        .setSmallIcon(R.drawable.ic_water_drop)
-        .setContentTitle("💧 ¡Alerta de Fuga de Agua!")
-        .setContentText("Se detectó un flujo continuo. Cierra la válvula para evitar desperdicio.")
-        .setPriority(NotificationCompat.PRIORITY_HIGH)
-        .setCategory(NotificationCompat.CATEGORY_ALARM)
-        .setAutoCancel(true)
-
-    notificationManager.notify(notificationId, builder.build())
-}
-
 
 @Preview(showBackground = true)
 @Composable

@@ -1,13 +1,8 @@
 package com.example.aguainteligente.ui.dashboard
 
-import android.Manifest
 import android.graphics.Paint
 import android.graphics.Typeface
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -16,6 +11,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -25,25 +21,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.aguainteligente.data.repository.AuthRepository
 import com.example.aguainteligente.data.repository.FirestoreRepository
-import com.example.aguainteligente.ui.theme.AguaInteligenteTheme
 import com.example.aguainteligente.ui.theme.BlueDark
 import com.example.aguainteligente.ui.theme.BlueElectric
 import com.example.aguainteligente.ui.theme.GreenAccent
@@ -78,26 +71,13 @@ fun DashboardScreen(
     val peakConsumptionData by dashboardViewModel.peakConsumptionData.collectAsState()
     val isLoadingHistory by dashboardViewModel.isLoadingHistory.collectAsState()
     val historyError by dashboardViewModel.historyError.collectAsState()
-    val currentFlowLiters by dashboardViewModel.currentFlowLiters.collectAsState()
-    val leakAlert by dashboardViewModel.leakAlert.collectAsState()
+    val flowRate by dashboardViewModel.currentFlowRate.collectAsState()
     val valveState by dashboardViewModel.valveState.collectAsState()
 
     val context = LocalContext.current
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-        onResult = { isGranted ->
-            dashboardViewModel.initialize(context)
-            dashboardViewModel.fetchConsumptionData()
-        }
-    )
-
     LaunchedEffect(key1 = true) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            dashboardViewModel.initialize(context)
-            dashboardViewModel.fetchConsumptionData()
-        }
+        dashboardViewModel.initialize(context)
+        dashboardViewModel.fetchConsumptionData()
     }
 
     Scaffold(
@@ -137,11 +117,11 @@ fun DashboardScreen(
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .shadow(12.dp, RoundedCornerShape(20.dp)),
+                            .shadow(8.dp, RoundedCornerShape(24.dp)),
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
                         ),
-                        shape = RoundedCornerShape(20.dp)
+                        shape = RoundedCornerShape(24.dp)
                     ) {
                         Row(
                             modifier = Modifier
@@ -193,14 +173,13 @@ fun DashboardScreen(
                 }
 
                 ValveControlCard(
-                    leakAlert = leakAlert,
                     valveState = valveState,
-                    onValveStateChange = { isChecked ->
-                        dashboardViewModel.setValveState(isChecked)
-                    }
+                    onValveStateChange = { dashboardViewModel.toggleValve() }
                 )
 
-                AnimatedConsumptionCard(currentFlowLiters)
+                CurrentFlowCard(flowRate = flowRate)
+
+                DispenseCard(viewModel = dashboardViewModel)
 
                 if (isLoadingHistory) {
                     LoadingCard()
@@ -228,141 +207,174 @@ fun DashboardScreen(
 
 @Composable
 fun ValveControlCard(
-    leakAlert: Boolean,
     valveState: Boolean,
-    onValveStateChange: (Boolean) -> Unit
+    onValveStateChange: () -> Unit
 ) {
-    val cardColor by animateColorAsState(
-        targetValue = if (leakAlert) Color(0xFFFFE0E0) else MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
-        animationSpec = tween(500)
-    )
-
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(12.dp, RoundedCornerShape(20.dp)),
-        colors = CardDefaults.cardColors(containerColor = cardColor),
-        shape = RoundedCornerShape(20.dp)
+        modifier = Modifier.fillMaxWidth().shadow(8.dp, RoundedCornerShape(24.dp)),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f))
     ) {
-        Column(
-            modifier = Modifier
-                .padding(20.dp)
-                .fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
+        Row(
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            AnimatedVisibility(visible = leakAlert) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(bottom = 16.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = "Alerta de Fuga",
-                        tint = Color.Red,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        "¡Alerta de Fuga Detectada!",
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color.Red
-                        )
-                    )
-                }
-            }
-
             Text(
-                "Control de Válvula Principal",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface
+                text = "Válvula Principal",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
             )
-            Spacer(modifier = Modifier.height(16.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
+            Button(
+                onClick = onValveStateChange,
+                shape = RoundedCornerShape(16.dp),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
+                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (valveState) Color.Red.copy(alpha = 0.8f) else GreenAccent
+                )
             ) {
-                Text(
-                    if (valveState) "Válvula Abierta" else "Válvula Cerrada",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (valveState) GreenAccent else Color.Gray,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.width(16.dp))
-                Switch(
-                    checked = valveState,
-                    onCheckedChange = onValveStateChange,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = GreenAccent,
-                        checkedTrackColor = GreenAccent.copy(alpha = 0.5f),
-                        uncheckedThumbColor = MaterialTheme.colorScheme.onSurface,
-                        uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                )
+                AnimatedContent(targetState = valveState, transitionSpec = {
+                    fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300))
+                }) { isOpen ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = if (isOpen) Icons.Default.PowerSettingsNew else Icons.Default.PowerSettingsNew,
+                            contentDescription = if (isOpen) "Cerrar" else "Abrir"
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (isOpen) "CERRAR" else "ABRIR", fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-fun AnimatedConsumptionCard(currentFlow: Float) {
-    val animatedFlow by animateFloatAsState(
-        targetValue = currentFlow,
-        animationSpec = tween(durationMillis = 1000, easing = LinearEasing)
-    )
+fun CurrentFlowCard(flowRate: Float) {
+    Card(
+        modifier = Modifier.fillMaxWidth().shadow(12.dp, RoundedCornerShape(28.dp)),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f))
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp).fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.WaterDrop, contentDescription = "Flujo", tint = BlueElectric)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Flujo Actual",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = "%.2f".format(flowRate),
+                style = MaterialTheme.typography.displayLarge.copy(
+                    color = BlueElectric,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 72.sp
+                )
+            )
+            Text(
+                "LITROS / MINUTO",
+                style = MaterialTheme.typography.labelLarge.copy(
+                    color = BlueElectric.copy(alpha = 0.8f),
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 4.sp
+                )
+            )
+        }
+    }
+}
+
+@Composable
+fun DispenseCard(viewModel: DashboardViewModel) {
+    var amountToDispense by remember { mutableStateOf("") }
+    val totalToDispense by viewModel.dispenseAmount.collectAsState()
+    val dispensedProgress by viewModel.dispensedProgress.collectAsState()
+    val isDispensing by remember { derivedStateOf { totalToDispense > 0f } }
+
+    val progress = if (totalToDispense > 0) (dispensedProgress / totalToDispense).coerceIn(0f, 1f) else 0f
+    val animatedProgress by animateFloatAsState(targetValue = progress, animationSpec = tween(500))
 
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(16.dp, RoundedCornerShape(24.dp)),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
-        ),
-        shape = RoundedCornerShape(24.dp)
+        modifier = Modifier.fillMaxWidth().shadow(8.dp, RoundedCornerShape(24.dp)),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f))
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.radialGradient(
-                        listOf(
-                            GreenAccent.copy(alpha = 0.1f),
-                            Color.Transparent
-                        ),
-                        radius = 300f
-                    )
-                )
+        Column(
+            modifier = Modifier.padding(24.dp).fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .padding(24.dp)
-                    .fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "💧 Consumo del Intervalo",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.Bold
-                    )
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "${"%.2f".format(animatedFlow)}",
-                    style = MaterialTheme.typography.displayLarge.copy(
-                        color = GreenAccent,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 72.sp
-                    )
-                )
-                Text(
-                    text = "LITROS",
-                    style = MaterialTheme.typography.labelLarge.copy(
-                        color = GreenAccent.copy(alpha = 0.8f),
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 4.sp
-                    )
-                )
+            Text(
+                text = "Dispensador de Agua",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            )
+
+            AnimatedContent(targetState = isDispensing, transitionSpec = {
+                fadeIn(animationSpec = tween(300)) + scaleIn(animationSpec = tween(300)) togetherWith
+                        fadeOut(animationSpec = tween(300)) + scaleOut(animationSpec = tween(300))
+            }) { dispensing ->
+                if (dispensing) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Dispensando %.2f / %.2f Litros".format(dispensedProgress, totalToDispense),
+                            style = MaterialTheme.typography.bodyLarge)
+                        LinearProgressIndicator(
+                            progress = animatedProgress,
+                            modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)),
+                            color = GreenAccent,
+                            trackColor = GreenAccent.copy(alpha = 0.2f)
+                        )
+                        Button(
+                            onClick = { viewModel.cancelDispensing() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.8f)),
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Text("CANCELAR", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        OutlinedTextField(
+                            value = amountToDispense,
+                            onValueChange = { amountToDispense = it },
+                            label = { Text("Cantidad en Litros (ej: 0.25)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
+                        ) {
+                            OutlinedButton(onClick = { viewModel.startDispensing(0.2f) }) { Text("Vaso") }
+                            OutlinedButton(onClick = { viewModel.startDispensing(1.5f) }) { Text("Botella") }
+                            OutlinedButton(onClick = { viewModel.startDispensing(0.05f) }) { Text("Dientes") }
+                        }
+
+                        Button(
+                            onClick = {
+                                val liters = amountToDispense.toFloatOrNull()
+                                if (liters != null) {
+                                    viewModel.startDispensing(liters)
+                                }
+                            },
+                            enabled = amountToDispense.toFloatOrNull() != null,
+                            modifier = Modifier.fillMaxWidth().height(50.dp),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Text("INICIAR DISPENSADO", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             }
         }
     }
@@ -377,34 +389,31 @@ fun HistoricalConsumptionCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(12.dp, RoundedCornerShape(20.dp)),
+            .shadow(8.dp, RoundedCornerShape(24.dp)),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
         ),
-        shape = RoundedCornerShape(20.dp)
+        shape = RoundedCornerShape(24.dp)
     ) {
         Column(
             modifier = Modifier
-                .padding(20.dp)
+                .padding(24.dp)
                 .fillMaxWidth()
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(bottom = 16.dp)
+                modifier = Modifier.padding(bottom = 20.dp)
             ) {
                 Icon(
-                    Icons.Default.Assessment,
+                    Icons.Default.Leaderboard,
                     contentDescription = null,
                     tint = BlueElectric,
                     modifier = Modifier.size(24.dp)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(12.dp))
                 Text(
                     text = "Resumen de Consumo",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.Bold
-                    )
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                 )
             }
 
@@ -413,23 +422,6 @@ fun HistoricalConsumptionCard(
             EnhancedWaterConsumptionItem("📊 Esta Semana", weeklyConsumption, BlueElectric)
             Spacer(modifier = Modifier.height(12.dp))
             EnhancedWaterConsumptionItem("📈 Este Mes", monthlyConsumption, BlueDark)
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Text(
-                text = "📊 Gráfica de Consumo",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Bold
-                ),
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
-
-            EnhancedBarChart(
-                dailyConsumption = dailyConsumption,
-                weeklyConsumption = weeklyConsumption,
-                monthlyConsumption = monthlyConsumption
-            )
         }
     }
 }
@@ -443,48 +435,52 @@ fun MonthlyComparisonCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(12.dp, RoundedCornerShape(20.dp)),
+            .shadow(8.dp, RoundedCornerShape(24.dp)),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
         ),
-        shape = RoundedCornerShape(20.dp)
+        shape = RoundedCornerShape(24.dp)
     ) {
         Column(
             modifier = Modifier
-                .padding(20.dp)
+                .padding(24.dp)
                 .fillMaxWidth()
         ) {
-            Text(
-                text = "📈 Historial Mensual",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Bold
-                ),
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
+            Row(verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 20.dp)) {
+                Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = BlueElectric, modifier = Modifier.size(24.dp))
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = "Historial Mensual",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                )
+            }
 
             val difference = currentMonth - previousMonth
             val isIncreased = difference > 0
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("Este mes", style = MaterialTheme.typography.bodyMedium)
+                    Text("Este mes", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
                         "${"%.1f".format(currentMonth)} L",
-                        style = MaterialTheme.typography.headlineSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = BlueElectric
-                        )
+                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold, color = BlueElectric)
                     )
                 }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text("Diferencia", style = MaterialTheme.typography.bodyMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = if (isIncreased) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
+                        contentDescription = "Diferencia",
+                        tint = if(isIncreased) Color.Red else GreenAccent
+                    )
+                    Spacer(Modifier.width(4.dp))
                     Text(
-                        "${if(isIncreased) "+" else ""}${"%.1f".format(difference)} L",
-                        style = MaterialTheme.typography.headlineSmall.copy(
+                        "${"%.1f".format(kotlin.math.abs(difference))} L",
+                        style = MaterialTheme.typography.titleLarge.copy(
                             fontWeight = FontWeight.Bold,
                             color = if(isIncreased) Color.Red else GreenAccent
                         )
@@ -492,7 +488,7 @@ fun MonthlyComparisonCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             MonthlyHistoryChart(monthlyHistory)
         }
@@ -504,25 +500,26 @@ fun PeakConsumptionCard(peakData: Map<String, Float>) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(12.dp, RoundedCornerShape(20.dp)),
+            .shadow(8.dp, RoundedCornerShape(24.dp)),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
         ),
-        shape = RoundedCornerShape(20.dp)
+        shape = RoundedCornerShape(24.dp)
     ) {
         Column(
             modifier = Modifier
-                .padding(20.dp)
+                .padding(24.dp)
                 .fillMaxWidth()
         ) {
-            Text(
-                text = "⚡ Picos de Consumo",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Bold
-                ),
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
+            Row(verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 20.dp)) {
+                Icon(Icons.Default.Bolt, contentDescription = null, tint = Orange, modifier = Modifier.size(24.dp))
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = "Picos de Consumo",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                )
+            }
 
             peakData.entries.forEachIndexed { index, (label, value) ->
                 val colors = listOf(Color.Red, Orange, Color(0xFFFF6B35))
@@ -537,199 +534,79 @@ fun PeakConsumptionCard(peakData: Map<String, Float>) {
 
 @Composable
 fun EnhancedWaterConsumptionItem(label: String, value: Float, color: Color) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = color.copy(alpha = 0.1f)
-        ),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Medium
-                )
-            )
-            Text(
-                text = "${"%.2f".format(value)} L",
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = color
-                )
-            )
-        }
-    }
-}
-
-@Composable
-fun EnhancedBarChart(
-    dailyConsumption: Float,
-    weeklyConsumption: Float,
-    monthlyConsumption: Float
-) {
-    val labels = listOf("Día", "Semana", "Mes")
-    val values = listOf(dailyConsumption, weeklyConsumption, monthlyConsumption)
-    val barColors = listOf(GreenAccent, BlueElectric, BlueDark)
-
-    Card(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(240.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = Color.White.copy(alpha = 0.05f)
-        ),
-        shape = RoundedCornerShape(16.dp)
+            .background(color.copy(alpha = 0.1f), RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Canvas(modifier = Modifier
-            .fillMaxSize()
-            .padding(20.dp)) {
-            val padding = 30.dp.toPx()
-            val barWidth = (size.width - 2 * padding) / (values.size * 2f)
-            val maxConsumption = values.maxOrNull()?.let { if (it > 0) it else 1f } ?: 1f
-
-
-            values.forEachIndexed { index, value ->
-                val barHeight = (value / maxConsumption) * (size.height - 3 * padding)
-                val x = padding + index * (barWidth * 2f)
-                val y = size.height - 2 * padding - barHeight
-
-                drawRoundRect(
-                    color = Color.Black.copy(alpha = 0.1f),
-                    topLeft = Offset(x + 4.dp.toPx(), y + 4.dp.toPx()),
-                    size = Size(barWidth, barHeight),
-                    cornerRadius = CornerRadius(8.dp.toPx())
-                )
-
-                drawRoundRect(
-                    color = barColors[index],
-                    topLeft = Offset(x, y),
-                    size = Size(barWidth, barHeight),
-                    cornerRadius = CornerRadius(8.dp.toPx())
-                )
-
-                drawContext.canvas.nativeCanvas.apply {
-                    val paint = Paint().apply {
-                        this.color = android.graphics.Color.WHITE
-                        textSize = 14.sp.toPx()
-                        textAlign = Paint.Align.CENTER
-                        typeface = Typeface.DEFAULT_BOLD
-                    }
-                    drawText(
-                        "%.1f L".format(value),
-                        x + barWidth / 2,
-                        y - 8.dp.toPx(),
-                        paint
-                    )
-                }
-
-                drawContext.canvas.nativeCanvas.apply {
-                    val paint = Paint().apply {
-                        this.color = android.graphics.Color.WHITE
-                        textSize = 12.sp.toPx()
-                        textAlign = Paint.Align.CENTER
-                        typeface = Typeface.DEFAULT_BOLD
-                    }
-                    drawText(
-                        labels[index],
-                        x + barWidth / 2,
-                        size.height - padding + 20.dp.toPx(),
-                        paint
-                    )
-                }
-            }
-        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge.copy(
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Medium
+            )
+        )
+        Text(
+            text = "${"%.2f".format(value)} L",
+            style = MaterialTheme.typography.bodyLarge.copy(
+                fontWeight = FontWeight.Bold,
+                color = color
+            )
+        )
     }
 }
 
 @Composable
 fun MonthlyHistoryChart(monthlyHistory: List<Pair<String, Float>>) {
-    Card(
+    val textColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f).toArgb()
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(200.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = Color.White.copy(alpha = 0.05f)
-        ),
-        shape = RoundedCornerShape(16.dp)
+            .height(200.dp)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
+            .padding(16.dp)
     ) {
-        Canvas(modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)) {
-            val padding = 20.dp.toPx()
-            val maxValue = monthlyHistory.maxOfOrNull { it.second }?.let { if (it > 0) it else 1f } ?: 1f
-            val stepX = if (monthlyHistory.size > 1) (size.width - 2 * padding) / (monthlyHistory.size - 1) else 0f
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val (points, labels) = monthlyHistory.map { it.second } to monthlyHistory.map { it.first }
+            if (points.isEmpty()) return@Canvas
 
-            if (monthlyHistory.size > 1) {
-                val path = Path()
-                monthlyHistory.forEachIndexed { index, (_, value) ->
-                    val x = padding + index * stepX
-                    val y = size.height - padding - (value / maxValue) * (size.height - 2 * padding)
+            val maxValue = points.maxOrNull() ?: 0f
+            val path = Path()
+            val stepX = size.width / (points.size - 1).coerceAtLeast(1)
 
-                    if (index == 0) {
-                        path.moveTo(x, y)
-                    } else {
-                        path.lineTo(x, y)
-                    }
-                }
-
-                drawPath(
-                    path = path,
-                    color = BlueElectric,
-                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-                )
+            points.forEachIndexed { index, point ->
+                val x = index * stepX
+                val y = size.height - (point / maxValue) * size.height
+                if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
 
-            monthlyHistory.forEachIndexed { index, (label, value) ->
-                val x = padding + index * stepX
-                val y = size.height - padding - (value / maxValue) * (size.height - 2 * padding)
+            drawPath(
+                path = path,
+                brush = Brush.verticalGradient(
+                    colors = listOf(BlueElectric, BlueElectric.copy(alpha = 0.3f))
+                ),
+                style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round)
+            )
 
-                drawCircle(
-                    color = BlueElectric,
-                    radius = 6.dp.toPx(),
-                    center = Offset(x, y)
+            val textPaint = Paint().apply {
+                color = textColor
+                textSize = 12.sp.toPx()
+                textAlign = Paint.Align.CENTER
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+
+            labels.forEachIndexed { index, label ->
+                val x = index * stepX
+                drawContext.canvas.nativeCanvas.drawText(
+                    label,
+                    x,
+                    size.height,
+                    textPaint
                 )
-
-                drawCircle(
-                    color = Color.White,
-                    radius = 3.dp.toPx(),
-                    center = Offset(x, y)
-                )
-
-                drawContext.canvas.nativeCanvas.apply {
-                    val textPaintLabel = Paint().apply {
-                        this.color = android.graphics.Color.WHITE
-                        textSize = 10.sp.toPx()
-                        textAlign = Paint.Align.CENTER
-                    }
-                    val textPaintValue = Paint().apply {
-                        this.color = android.graphics.Color.WHITE
-                        textSize = 10.sp.toPx()
-                        textAlign = Paint.Align.CENTER
-                        typeface = Typeface.DEFAULT_BOLD
-                    }
-
-                    drawText(
-                        label,
-                        x,
-                        size.height,
-                        textPaintLabel
-                    )
-
-                    drawText(
-                        "%.0f".format(value),
-                        x,
-                        y - 10.dp.toPx(),
-                        textPaintValue
-                    )
-                }
             }
         }
     }
@@ -741,21 +618,21 @@ fun LoadingCard() {
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp)
-            .shadow(12.dp, RoundedCornerShape(20.dp)),
+            .shadow(8.dp, RoundedCornerShape(24.dp)),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
         ),
-        shape = RoundedCornerShape(20.dp)
+        shape = RoundedCornerShape(24.dp)
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .padding(24.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.width(16.dp))
             Text(
                 text = "Cargando datos...",
                 style = MaterialTheme.typography.titleMedium,
@@ -771,21 +648,21 @@ fun ErrorCard(errorMessage: String) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp)
-            .shadow(12.dp, RoundedCornerShape(20.dp)),
+            .shadow(8.dp, RoundedCornerShape(24.dp)),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.95f)
+            containerColor = MaterialTheme.colorScheme.errorContainer
         ),
-        shape = RoundedCornerShape(20.dp)
+        shape = RoundedCornerShape(24.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp),
+                .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
             Icon(
-                Icons.Default.ErrorOutline,
+                Icons.Default.CloudOff,
                 contentDescription = "Error",
                 tint = MaterialTheme.colorScheme.onErrorContainer,
                 modifier = Modifier.size(48.dp)
@@ -794,6 +671,7 @@ fun ErrorCard(errorMessage: String) {
             Text(
                 text = "¡Oh no! Ha ocurrido un error:",
                 style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )
             Spacer(modifier = Modifier.height(8.dp))
@@ -804,16 +682,5 @@ fun ErrorCard(errorMessage: String) {
                 textAlign = TextAlign.Center
             )
         }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun DashboardScreenPreview() {
-    AguaInteligenteTheme {
-        DashboardScreen(
-            onLogout = {},
-            onNavigateToTips = {},
-        )
     }
 }

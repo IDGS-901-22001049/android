@@ -4,17 +4,11 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.example.aguainteligente.data.model.WaterConsumption
 import com.example.aguainteligente.data.repository.AuthRepository
 import com.example.aguainteligente.data.repository.FirestoreRepository
 import com.example.aguainteligente.data.service.MqttManager
-import com.example.aguainteligente.data.service.NotificationService
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 class DashboardViewModel(
@@ -22,6 +16,9 @@ class DashboardViewModel(
     private val authRepository: AuthRepository
 ) : ViewModel() {
 
+    private var mqttManager: MqttManager? = null
+
+    // --- ESTADOS DE FIRESTORE ---
     private val _dailyConsumption = MutableStateFlow(0f)
     val dailyConsumption: StateFlow<Float> = _dailyConsumption
     private val _weeklyConsumption = MutableStateFlow(0f)
@@ -39,41 +36,20 @@ class DashboardViewModel(
     private val _historyError = MutableStateFlow<String?>(null)
     val historyError: StateFlow<String?> = _historyError
 
-    private var mqttManager: MqttManager? = null
-    private var notificationService: NotificationService? = null
-
-    private val _currentFlowLiters = MutableStateFlow(0f)
-    val currentFlowLiters: StateFlow<Float> = _currentFlowLiters
-    private val _leakAlert = MutableStateFlow(false)
-    val leakAlert: StateFlow<Boolean> = _leakAlert
+    // --- ESTADOS DE MQTT Y CONTROL ---
+    val currentFlowRate: StateFlow<Float> get() = mqttManager?.currentFlowRate ?: MutableStateFlow(0f)
     private val _valveState = MutableStateFlow(false)
     val valveState: StateFlow<Boolean> = _valveState
-
-    private var savingJob: Job? = null
+    private val _dispenseAmount = MutableStateFlow(0f)
+    val dispenseAmount: StateFlow<Float> = _dispenseAmount
+    private val _dispensedProgress = MutableStateFlow(0f)
+    val dispensedProgress: StateFlow<Float> = _dispensedProgress
+    private var dispenseJob: Job? = null
 
     fun initialize(context: Context) {
         if (mqttManager == null) {
-            val userId = authRepository.getCurrentUser()?.uid
-            notificationService = NotificationService(context)
-            mqttManager = MqttManager(userId).apply {
+            mqttManager = MqttManager(authRepository.getCurrentUser()?.uid).apply {
                 connect()
-                this.currentFlowLiters.onEach { litersInInterval ->
-                    _currentFlowLiters.value = litersInInterval
-                    if (litersInInterval > 0) {
-                        savingJob?.cancel()
-                        savingJob = viewModelScope.launch {
-                            delay(6000)
-                            addWaterConsumption(litersInInterval)
-                        }
-                    }
-                }.launchIn(viewModelScope)
-
-                this.leakAlert.onEach { hasLeak ->
-                    _leakAlert.value = hasLeak
-                    if (hasLeak) {
-                        notificationService?.showLeakAlertNotification()
-                    }
-                }.launchIn(viewModelScope)
             }
         }
     }
@@ -99,24 +75,48 @@ class DashboardViewModel(
         }
     }
 
-    private fun addWaterConsumption(liters: Float) {
-        authRepository.getCurrentUser()?.uid?.let { userId ->
-            viewModelScope.launch {
-                _historyError.value = null
-                try {
-                    val newConsumption = WaterConsumption(userId = userId, liters = liters, timestamp = System.currentTimeMillis())
-                    firestoreRepository.addWaterConsumption(newConsumption)
-                    fetchConsumptionData()
-                } catch (e: Exception) {
-                    _historyError.value = "Error al agregar consumo: ${e.localizedMessage}"
+    fun toggleValve() {
+        mqttManager?.sendValvePulse()
+        _valveState.value = !_valveState.value
+    }
+
+    fun startDispensing(liters: Float) {
+        if (liters <= 0f) return
+
+        dispenseJob?.cancel()
+        _dispenseAmount.value = liters
+        _dispensedProgress.value = 0f
+
+        dispenseJob = viewModelScope.launch {
+            if (!_valveState.value) {
+                toggleValve()
+            }
+
+            var accumulatedLiters = 0f
+
+            currentFlowRate.collect { flowRateLitersPerMinute ->
+                val litersPerSecond = flowRateLitersPerMinute / 60f
+                accumulatedLiters += litersPerSecond
+                _dispensedProgress.value = accumulatedLiters
+
+                if (accumulatedLiters >= liters) {
+                    if (_valveState.value) {
+                        toggleValve()
+                    }
+                    _dispenseAmount.value = 0f
+                    this.coroutineContext[Job]?.cancel()
                 }
             }
         }
     }
 
-    fun setValveState(isOn: Boolean) {
-        _valveState.value = isOn
-        mqttManager?.publishValveState(if (isOn) "ON" else "OFF")
+    fun cancelDispensing() {
+        dispenseJob?.cancel()
+        if (_valveState.value) {
+            toggleValve()
+        }
+        _dispenseAmount.value = 0f
+        _dispensedProgress.value = 0f
     }
 
     fun logout() {
